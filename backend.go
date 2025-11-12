@@ -13,11 +13,6 @@ package main
 		User name
 		MAC address
 		...
-	
-		
-
-
-
 */
 
 import (
@@ -26,46 +21,58 @@ import (
 	"os"
 	"net"
 	"time" 
+	"bytes"
 
 
 	"golang.org/x/crypto/ssh"
+	"gopkg.in/yaml.v3"
 )
 
 var(
 	home_path = "/home/francesco/.ssh/"
 )
 
-func loadAuthorizedKeys() (map[string]bool, error){
+type SSHUser struct{
+	Username string `yaml:"username"`
+	PubKey string `yaml:"pubkey"`
+	MACAddress string `yaml:"mac_address"`
+}
 
-	authorizedKeysBytes, err := os.ReadFile(home_path + "authorized_keys")
+type SSHUsers struct {
+	Users []SSHUser `yaml:"sshusers"`
+}
 
+type SSHServer struct{
+
+	AuthorizedUsers SSHUsers 
+	Config *ssh.ServerConfig
+	TCPListener net.Listener
+	PrivateKey ssh.Signer
+
+}
+
+func loadYAMLAuthorizedKeys() (SSHUsers, error){
+
+	authorizedUsers, err := os.ReadFile(home_path + "authorized_keys.yaml")
+	var users SSHUsers
+	
 	if err!= nil {
-		return nil, err
+		return SSHUsers{}, err
 	}
 
-	authorizedKeysMap := make(map[string]bool)
-
-	for len(authorizedKeysBytes) > 0 {
-		pubKey, _, _, rest, err := ssh.ParseAuthorizedKey(authorizedKeysBytes)
-		
-		if err != nil {
-			return nil, err		}
-
-		authorizedKeysMap[string(pubKey.Marshal())] = true
-		authorizedKeysBytes = rest
+	if err := yaml.Unmarshal(authorizedUsers, &users); err != nil {
+		return SSHUsers{}, err
 	}
 
-	return authorizedKeysMap, nil
+	return users, err
+
 }
 //TODO: Change this to an SSH Request instead of an HTTP Request
-/*func recvMACAddress(w http.ResponseWriter, req *http.Request){
-	_ = w
-		
-	query := req.URL.Query()
+func sendWoL(MACAddress string){
 
-	fmt.Printf("received MAC Address: %s", query.Get("MACAddress"))
+	fmt.Printf("received MAC Address: %s", MACAddress)
 
-	macAddress, err := net.ParseMAC(query.Get("MACAddress"))
+	macAddress, err := net.ParseMAC(MACAddress)
 	
 	if err != nil{
 		log.Fatal(err)	
@@ -103,29 +110,46 @@ func loadAuthorizedKeys() (map[string]bool, error){
 	}
 
 
-}*/
+}
+
+func initSSHConfig(authorizedUsers SSHUsers) (*ssh.ServerConfig){
+
+	return &ssh.ServerConfig{
+		PublicKeyCallback: func(c ssh.ConnMetadata, pubkey ssh.PublicKey) (*ssh.Permissions, error) {
+			for _, sshUser := range authorizedUsers.Users {
+				parsedKey, _, _, _, err:= ssh.ParseAuthorizedKey([]byte(sshUser.PubKey))
+				if err != nil {
+					fmt.Errorf("Error parsing key for %s, %q", sshUser.Username, err)
+				}
+
+				if bytes.Equal(parsedKey.Marshal(), pubkey.Marshal()){
+					return &ssh.Permissions{
+					Extensions: map[string]string{
+						"pubkey-fp": ssh.FingerprintSHA256(pubkey),
+						"username": sshUser.Username,
+						"macaddress": sshUser.MACAddress,
+					},
+				}, nil
+			} 
+		}
+		return nil, fmt.Errorf("Unknown public key for %q", c.User())
+		},
+	}
+
+}
 
 func main(){
-
-	authorizedKeysMap, err:= loadAuthorizedKeys()
+	sshServer := SSHServer{}
+	
+	sshServer.AuthorizedUsers, err:= loadYAMLAuthorizedKeys()
 
 	if err != nil{
 		log.Fatal("Error: ", err)
 	}
+	
+	sshServer.Config= initSSHConfig(sshServer.AuthorizedUsers)
 
-	sshConfig := &ssh.ServerConfig{
-		
-		PublicKeyCallback: func(c ssh.ConnMetadata, pubkey ssh.PublicKey) (*ssh.Permissions, error) {
-			if authorizedKeysMap[string(pubkey.Marshal())] {
-				return &ssh.Permissions{
-				Extensions: map[string]string{
-					"pubkey-fp": ssh.FingerprintSHA256(pubkey),
-				},
-			}, nil
-		} 
-		return nil, fmt.Errorf("Unknown public key for %q", c.User())
-		},
-	}
+	
 
 	privateBytes, err := os.ReadFile(home_path + "id_ed25519")
 
@@ -139,7 +163,7 @@ func main(){
 		log.Fatal("Couldn't parse private key: ", err)
 	}
 
-	sshConfig.AddHostKey(privateKey)
+	sshServer.Config.AddHostKey(privateKey)
 
 	listener, err := net.Listen("tcp", "0.0.0.0:2222")
 
@@ -159,14 +183,14 @@ func main(){
 			continue
 		}
 
-		sshConn, chans, reqs, err:= ssh.NewServerConn(conn, sshConfig)
+		sshConn, chans, reqs, err:= ssh.NewServerConn(conn, sshServer.Config)
 		if err != nil {
 			fmt.Printf("Error while handshaking: %s\n", err)
 			continue
 		}
 
 		fmt.Printf("New connection request received from: %s at %v \n", conn.RemoteAddr(), time.Now())
-		fmt.Printf("Logged in with key %s\n", sshConn.Permissions.Extensions["pubkey-fp"])
+		fmt.Printf("Logged in with key %s, name: %s, MAC Address: %s \n", sshConn.Permissions.Extensions["pubkey-fp"],sshConn.Permissions.Extensions["username"],sshConn.Permissions.Extensions["macaddress"]  )
 
 		go ssh.DiscardRequests(reqs)
 
@@ -184,7 +208,6 @@ func main(){
 		
 				//defer channel.Close()
 			
-				for{
 				/*n, err:= channel.Read(buf)
 				if err != nil{
 					fmt.Printf("Error while reading, closing channel connection")
@@ -194,12 +217,12 @@ func main(){
 					return
 				}*/
 
-				//fmt.Print("Received bytes and length: %s, %d \n", string(buf[:n]), n)
 				
 				response := fmt.Sprintf("Buongiorno\n")
 				channel.Write([]byte(response))
+				//sendWoL("58-47-Ca-70-58-93")
 				channel.Close()	
-				}
+				
 			}()
 
 
