@@ -51,23 +51,6 @@ type SSHServer struct{
 
 }
 
-func loadYAMLAuthorizedKeys() (SSHUsers, error){
-
-	authorizedUsers, err := os.ReadFile(home_path + "authorized_keys.yaml")
-	var users SSHUsers
-	
-	if err!= nil {
-		return SSHUsers{}, err
-	}
-
-	if err := yaml.Unmarshal(authorizedUsers, &users); err != nil {
-		return SSHUsers{}, err
-	}
-
-	return users, err
-
-}
-//TODO: Change this to an SSH Request instead of an HTTP Request
 func sendWoL(MACAddress string){
 
 	fmt.Printf("received MAC Address: %s", MACAddress)
@@ -112,9 +95,29 @@ func sendWoL(MACAddress string){
 
 }
 
-func initSSHConfig(authorizedUsers SSHUsers) (*ssh.ServerConfig){
 
-	return &ssh.ServerConfig{
+func loadYAMLAuthorizedKeys(server *SSHServer) (error){
+
+	authorizedUsers, err := os.ReadFile(home_path + "authorized_keys.yaml")
+	var users SSHUsers
+	
+	if err!= nil {
+		return err
+	}
+
+	if err := yaml.Unmarshal(authorizedUsers, &users); err != nil {
+		return err
+	}
+
+	server.AuthorizedUsers = users
+
+	return nil
+
+}
+
+func initSSHConfig(server *SSHServer, authorizedUsers SSHUsers) {
+
+	server.Config = &ssh.ServerConfig{
 		PublicKeyCallback: func(c ssh.ConnMetadata, pubkey ssh.PublicKey) (*ssh.Permissions, error) {
 			for _, sshUser := range authorizedUsers.Users {
 				parsedKey, _, _, _, err:= ssh.ParseAuthorizedKey([]byte(sshUser.PubKey))
@@ -138,32 +141,39 @@ func initSSHConfig(authorizedUsers SSHUsers) (*ssh.ServerConfig){
 
 }
 
-func main(){
-	sshServer := SSHServer{}
-	
-	sshServer.AuthorizedUsers, err:= loadYAMLAuthorizedKeys()
+func addPrivateKey(server *SSHServer, PrivKeyPath string) (error) {
 
-	if err != nil{
-		log.Fatal("Error: ", err)
-	}
-	
-	sshServer.Config= initSSHConfig(sshServer.AuthorizedUsers)
-
-	
-
-	privateBytes, err := os.ReadFile(home_path + "id_ed25519")
+	privateBytes, err := os.ReadFile(PrivKeyPath)
 
 	if err != nil {
 		log.Fatal("Couldn't read/find private key:  \n use 'ssh-keygen -t rsa' to generate a key pair", err)
+		return err
 	}
 
 	privateKey, err := ssh.ParsePrivateKey(privateBytes)
 	
 	if err != nil {
-		log.Fatal("Couldn't parse private key: ", err)
+		//log.Fatal("Couldn't parse private key: ", err)
+		return err
 	}
+	
+	server.Config.AddHostKey(privateKey)
+	return nil
+}
 
-	sshServer.Config.AddHostKey(privateKey)
+
+func main(){
+	sshServer := SSHServer{}
+	
+	err:= loadYAMLAuthorizedKeys(&sshServer)
+
+	if err != nil{
+		log.Fatal("Error: ", err)
+	}
+	
+	initSSHConfig(&sshServer, sshServer.AuthorizedUsers)
+	
+	addPrivateKey(&sshServer, home_path + "id_ed25519")
 
 	listener, err := net.Listen("tcp", "0.0.0.0:2222")
 
@@ -206,18 +216,7 @@ func main(){
 			}
 			go func(){
 		
-				//defer channel.Close()
-			
-				/*n, err:= channel.Read(buf)
-				if err != nil{
-					fmt.Printf("Error while reading, closing channel connection")
-					if error :=channel.Close(); error != nil{
-						fmt.Printf("Error while closing channel connection breh")
-					}
-					return
-				}*/
-
-				
+							
 				response := fmt.Sprintf("Buongiorno\n")
 				channel.Write([]byte(response))
 				//sendWoL("58-47-Ca-70-58-93")
@@ -227,7 +226,6 @@ func main(){
 
 
 		}
-		//buf:= make([]byte, 1024)
 		
 	}
 }
