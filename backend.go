@@ -29,7 +29,7 @@ import (
 )
 
 var(
-	home_path = "/home/francesco/.ssh/"
+	home_path = "/opt/rpi-wol/.ssh"
 )
 
 type SSHUser struct{
@@ -153,7 +153,7 @@ func addPrivateKey(server *SSHServer, PrivKeyPath string) (error) {
 	privateKey, err := ssh.ParsePrivateKey(privateBytes)
 	
 	if err != nil {
-		//log.Fatal("Couldn't parse private key: ", err)
+		log.Fatal("Couldn't parse private key: ", err)
 		return err
 	}
 	
@@ -173,7 +173,7 @@ func main(){
 	
 	initSSHConfig(&sshServer, sshServer.AuthorizedUsers)
 	
-	addPrivateKey(&sshServer, home_path + "id_ed25519")
+	addPrivateKey(&sshServer, home_path + "id_rsa")
 
 	listener, err := net.Listen("tcp", "0.0.0.0:2222")
 
