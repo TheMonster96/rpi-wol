@@ -1,0 +1,21 @@
+[Unit]
+Description=SSH Server for Wake-On-LAN written in Go and hosted on RPi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/rpi-wol/rpi-wol
+WorkingDirectory=/opt/rpi-wol
+Restart=on-failure
+RestartSec=5
+User=rpi-wol
+Group=rpi-wol
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
