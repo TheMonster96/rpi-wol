@@ -1,20 +1,5 @@
 package main
 
-/*
-	TODO:
-	-- Make an sshServer struct which contains:
-		listener,
-		context,
-		sshConfig,
-		AuthorizedKeysMap,
-		...
-	-- Switch to a YAML file which contains: 
-		Authorized key
-		User name
-		MAC address
-		...
-*/
-
 import (
 	"fmt"
 	"log"
@@ -29,8 +14,43 @@ import (
 )
 
 var(
-	home_path = "/opt/rpi-wol/.ssh"
+	log_path =  "/opt/rpi-wol/log.txt"
+	home_path = "/opt/rpi-wol/.ssh/"
 )
+
+/*===================== LOGGING FUNCTIONALITY ======================*/
+
+func initLogger(server *SSHServer) error {
+	
+	logFile, err := os.OpenFile(log_path, os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
+
+	if err != nil {
+		return err
+	}
+
+	server.LogFile = log.New(logFile, "RPI-WOL", log.LstdFlags | log.Lshortfile)
+
+	return nil
+}
+
+func logError(logFile *log.Logger, errorString string) {
+	logFile.Println("[ERROR] at %s : %s ", time.Now(), errorString);
+}
+
+func logInfo(logFile *log.Logger, infoString string) {
+	logFile.Println("[INFO] at %s : %s ", time.Now(), infoString);
+}
+
+
+type SSHServer struct{
+
+	LogFile *log.Logger
+	AuthorizedUsers SSHUsers 
+	Config *ssh.ServerConfig
+	TCPListener net.Listener
+	PrivateKey ssh.Signer
+
+}
 
 type SSHUser struct{
 	Username string `yaml:"username"`
@@ -42,26 +62,17 @@ type SSHUsers struct {
 	Users []SSHUser `yaml:"sshusers"`
 }
 
-type SSHServer struct{
 
-	AuthorizedUsers SSHUsers 
-	Config *ssh.ServerConfig
-	TCPListener net.Listener
-	PrivateKey ssh.Signer
 
-}
+func sendWoL(MACAddress string, logFile *log.Logger){
 
-func sendWoL(MACAddress string){
-
-	fmt.Printf("received MAC Address: %s", MACAddress)
+	logInfo(logFile, fmt.Format("Received MAC Address : %s", MACAddress))
 
 	macAddress, err := net.ParseMAC(MACAddress)
 	
 	if err != nil{
-		log.Fatal(err)	
+		logError(logFile, err.Error())	
 	}
-
-	fmt.Printf("\n%s", macAddress.String())
 
 	packet:= make([]byte, 102)
 
@@ -72,13 +83,11 @@ func sendWoL(MACAddress string){
 	for i:=0; i<16; i++ {
 		copy(packet[6+i*6:], macAddress)	
 	}
-
-	fmt.Printf(string(packet))
 	
 	conn, err := net.Dial("udp", "255.255.255.255:9")
 	
 	if err != nil {
-		log.Fatal(err)
+		logError(logFile, err.Error())
 	}
 
 	defer conn.Close()
@@ -89,7 +98,7 @@ func sendWoL(MACAddress string){
 	_, err = udpConn.Write(packet)
 
 	if err != nil {
-		log.Fatal(err)
+		logError(logFile, err.Error())
 	}
 
 
@@ -101,10 +110,13 @@ func loadYAMLAuthorizedKeys(server *SSHServer) (error){
 	authorizedUsers, err := os.ReadFile(home_path + "authorized_keys.yaml")
 	var users SSHUsers
 	
+	//Error reading the authorized_keys.yaml file 
 	if err!= nil {
+		logError(server.LogFile, err.Error()) 
 		return err
 	}
 
+	//Error parsing the authorized_keys.yaml content 
 	if err := yaml.Unmarshal(authorizedUsers, &users); err != nil {
 		return err
 	}
@@ -112,7 +124,6 @@ func loadYAMLAuthorizedKeys(server *SSHServer) (error){
 	server.AuthorizedUsers = users
 
 	return nil
-
 }
 
 func initSSHConfig(server *SSHServer, authorizedUsers SSHUsers) {
@@ -122,6 +133,7 @@ func initSSHConfig(server *SSHServer, authorizedUsers SSHUsers) {
 			for _, sshUser := range authorizedUsers.Users {
 				parsedKey, _, _, _, err:= ssh.ParseAuthorizedKey([]byte(sshUser.PubKey))
 				if err != nil {
+					//Will have to switch to logError(...) to log the parsing error
 					fmt.Errorf("Error parsing key for %s, %q", sshUser.Username, err)
 				}
 
@@ -135,6 +147,7 @@ func initSSHConfig(server *SSHServer, authorizedUsers SSHUsers) {
 				}, nil
 			} 
 		}
+		//Will have to switch to logError(...) to log unkown public key error
 		return nil, fmt.Errorf("Unknown public key for %q", c.User())
 		},
 	}
@@ -146,6 +159,7 @@ func addPrivateKey(server *SSHServer, PrivKeyPath string) (error) {
 	privateBytes, err := os.ReadFile(PrivKeyPath)
 
 	if err != nil {
+		//Will have to switch to logError(...)  
 		log.Fatal("Couldn't read/find private key:  \n use 'ssh-keygen -t rsa' to generate a key pair", err)
 		return err
 	}
@@ -153,6 +167,7 @@ func addPrivateKey(server *SSHServer, PrivKeyPath string) (error) {
 	privateKey, err := ssh.ParsePrivateKey(privateBytes)
 	
 	if err != nil {
+		//Will have to switch to logError(...)
 		log.Fatal("Couldn't parse private key: ", err)
 		return err
 	}
@@ -164,24 +179,35 @@ func addPrivateKey(server *SSHServer, PrivKeyPath string) (error) {
 
 func main(){
 	sshServer := SSHServer{}
+
+	err := initLogger(&sshServer)
 	
-	err:= loadYAMLAuthorizedKeys(&sshServer)
+	sshServer.LogFile.Println("Logger started successfully")
+
+	if err != nil {
+		log.Fatal("Logger Init Error: ", err)
+	}
+
+	err = loadYAMLAuthorizedKeys(&sshServer)
 
 	if err != nil{
-		log.Fatal("Error: ", err)
+		//Will have to remove this since it's going directly to the log file, but will have to add exit(1)
+		log.Fatal("Authorized Keys Error: ", err)
 	}
 	
 	initSSHConfig(&sshServer, sshServer.AuthorizedUsers)
 	
 	addPrivateKey(&sshServer, home_path + "id_rsa")
 
-	listener, err := net.Listen("tcp", "0.0.0.0:2222")
+	listener, err := net.Listen("tcp", "0.0.0.0:17035")
 
 	if err != nil {
+		//Will have to remove this and pass it to the log file, but will have to add exit(1)
 		log.Fatal("Failed to open TCP listener: ", err)  
 	}
-
-	fmt.Printf("Listening on 0.0.0.0:2222\n")
+	
+	//Going to the log file directly with logInfo(...)
+	fmt.Printf("Listening on 0.0.0.0:17035\n")
 
 	defer listener.Close()
 
@@ -189,16 +215,19 @@ func main(){
 		conn, err:= listener.Accept()
 
 		if err != nil {
+			//Will go directly to log file
 			fmt.Printf("Error while accepting incoming connection: %s", err)
 			continue
 		}
 
 		sshConn, chans, reqs, err:= ssh.NewServerConn(conn, sshServer.Config)
 		if err != nil {
+			//Will go directly to log file
 			fmt.Printf("Error while handshaking: %s\n", err)
 			continue
 		}
 
+		//Both of these will go to to log file
 		fmt.Printf("New connection request received from: %s at %v \n", conn.RemoteAddr(), time.Now())
 		fmt.Printf("Logged in with key %s, name: %s, MAC Address: %s \n", sshConn.Permissions.Extensions["pubkey-fp"],sshConn.Permissions.Extensions["username"],sshConn.Permissions.Extensions["macaddress"]  )
 
@@ -212,20 +241,13 @@ func main(){
 			}
 			channel, _ , err := newChannel.Accept()
 			if err != nil {
+				//Will go to log file, but will have to just close the connection instead of exiting the application
 				log.Fatal("Could not accept channel, %v\n", err)
 			}
 			go func(){
-		
-							
-				response := fmt.Sprintf("Buongiorno\n")
-				channel.Write([]byte(response))
-				//sendWoL("58-47-Ca-70-58-93")
+				sendWoL(sshConn.Permissions.Extensions["macaddress"])
 				channel.Close()	
-				
 			}()
-
-
 		}
-		
 	}
 }
