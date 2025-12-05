@@ -1,7 +1,7 @@
-inPath= /home/pi/rpi-wol/backend.go
+inPath= ./backend.go
 outPath= /opt/rpi-wol/rpi-wol
-goBin= /home/pi/go/bin/go
-
+stdDirectory=/opt/rpi-wol/
 
 all:
-	${goBin} build -o ${outPath} ${inPath}
+	mkdir -p ${stdDirectory} && mkdir -p ${stdDirectory}.ssh 
+	go build -gcflags "all=-N -l" -o ${outPath} ${inPath}

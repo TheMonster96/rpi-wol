@@ -8,7 +8,6 @@ import (
 	"time" 
 	"bytes"
 
-
 	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 )
@@ -66,7 +65,7 @@ type SSHUsers struct {
 
 func sendWoL(MACAddress string, logFile *log.Logger){
 
-	logInfo(logFile, fmt.Format("Received MAC Address : %s", MACAddress))
+	//logInfo(logFile, fmt.Sprintf("Received MAC Address : %s", MACAddress))
 
 	macAddress, err := net.ParseMAC(MACAddress)
 	
@@ -100,10 +99,7 @@ func sendWoL(MACAddress string, logFile *log.Logger){
 	if err != nil {
 		logError(logFile, err.Error())
 	}
-
-
 }
-
 
 func loadYAMLAuthorizedKeys(server *SSHServer) (error){
 
@@ -182,11 +178,11 @@ func main(){
 
 	err := initLogger(&sshServer)
 	
-	sshServer.LogFile.Println("Logger started successfully")
-
 	if err != nil {
 		log.Fatal("Logger Init Error: ", err)
 	}
+	
+	sshServer.LogFile.Println("Logger started successfully")
 
 	err = loadYAMLAuthorizedKeys(&sshServer)
 
@@ -245,7 +241,7 @@ func main(){
 				log.Fatal("Could not accept channel, %v\n", err)
 			}
 			go func(){
-				sendWoL(sshConn.Permissions.Extensions["macaddress"])
+				sendWoL(sshConn.Permissions.Extensions["macaddress"], sshServer.LogFile)
 				channel.Close()	
 			}()
 		}

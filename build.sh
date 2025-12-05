@@ -2,5 +2,6 @@
 
 set -e 
 
+#make && chmod +x ./backend
 
-sudo systemctl stop rpi-wol.service && make && sudo systemctl daemon-reload && sudo systemctl restart rpi-wol.service
+ make && sudo systemctl daemon-reload && sudo systemctl restart rpi-wol.service

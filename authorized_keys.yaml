@@ -1,0 +1,4 @@
+sshusers: 
+ - username: franc
+   pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ0mPGSzX1go/Gf4FV8et3npi26+lA63B1pOS5vG9IZS francescopavone525@gmail.com"
+   mac_address: "58-47-Ca-70-58-93"
